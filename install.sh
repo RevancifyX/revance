@@ -31,7 +31,7 @@ Possible causes of error:
 fi
 
 if git clone --depth=1 https://github.com/RevancifyX/revance.git; then
-    $HOME/RevancifyX/revance
+    $HOME/Revance/revancify
 else
     echo -e "\e[1;31mInstall Failed !!\e[0m"
     echo "Please Try again"
