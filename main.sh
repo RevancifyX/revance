@@ -27,13 +27,14 @@ initialize() {
     [ ! -d apps ] && mkdir -p apps
     arch=$(getprop ro.product.cpu.abi)
     repoDir="$HOME/Revancify"
-    header=(dialog --backtitle "Revancify | [Arch: $arch, SU: $rootStatus]" --no-shadow)
+    header=(dialog --backtitle "Revancify | [Arch: $arch, Root: $root]" --no-shadow)
     envFile=config.cfg
     [ ! -f "apps/.appSize" ] && : > "apps/.appSize"
+    userAgent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/74.0.3729.169 Safari/537.36"
 
-    forceUpdateCheckStatus="" riplibsRVX="" lightTheme="" patchMenuBeforePatching="" launchAppAfterMount="" allowVersionDowngrade="" fetchPreRelease=""
+    forceUpdateCheckStatus="" riplibs="" lightTheme="" patchMenuBeforePatching="" launchAppAfterMount="" allowVersionDowngrade="" fetchPreRelease=""
     setEnv forceUpdateCheckStatus false init "$envFile"
-    setEnv riplibsRVX true init "$envFile"
+    setEnv riplibs true init "$envFile"
     setEnv lightTheme false init "$envFile"
     setEnv patchMenuBeforePatching false init "$envFile"
     setEnv launchAppAfterMount true init "$envFile"
@@ -46,9 +47,9 @@ initialize() {
         source=$("${header[@]}" --begin 2 0 --title '| Source Selection Menu |' --no-cancel --ok-label "Done" --radiolist "Use arrow keys to navigate; Press Spacebar to select option" -1 -1 0 "${allSources[@]}" 2>&1 >/dev/tty)
         setEnv source "$source" update "$envFile"
     fi
-    [ "$rootStatus" == "root" ] && menuEntry="Uninstall Patched app" || menuEntry="Download Microg"
+    [ "$root" == true ] && menuEntry="Uninstall Patched app" || menuEntry="Download Microg"
 
-    [ "$lightTheme" == "true" ] && theme=light || theme=Dark
+    [ "$lightTheme" == true ] && theme=Light || theme=Dark
     export DIALOGRC="$repoDir/configs/.dialogrc$theme"
 
 
@@ -58,8 +59,9 @@ initialize() {
     source <(jq -r --arg source "$source" '.[$source].sources | to_entries[] | .key+"Source="+.value.org' "$repoDir"/sources.json)
     sourceName=$(jq -r --arg source "$source" '.[$source].projectName' "$repoDir"/sources.json)
 
-    checkTools || terminate 1
-    refreshJson
+    if [ "$2" != false ]; then
+        checkTools || terminate 1
+    fi
 
     if [ -f "$storagePath/$source-patches.json" ]; then
         bash "$repoDir/fetch_patches.sh" "$source" offline "$storagePath" &> /dev/null
@@ -81,7 +83,7 @@ fetchToolsAPI() {
     readarray -t tools < <(jq -r --arg source "$source" '.[$source].sources | keys_unsorted[]' "$repoDir"/sources.json)
     readarray -t links < <(jq -r --arg source "$source" '.[$source].sources[] | .org+"/"+.repo' "$repoDir"/sources.json)
     : >".${source}-data"
-    [ "$fetchPreRelease" == "false" ] && stableRelease="/latest" || stableRelease=""
+    [ "$fetchPreRelease" == false ] && stableRelease="/latest" || stableRelease=""
     i=0 && for tool in "${tools[@]}"; do
         curl -s --fail-early --connect-timeout 2 --max-time 5 "https://api.github.com/repos/${links[$i]}/releases$stableRelease" | jq -r --arg tool "$tool" 'if type == "array" then .[0] else . end | $tool+"Latest="+.tag_name, (.assets[] | if .content_type == "application/json" then "jsonUrl="+.browser_download_url, "jsonSize="+(.size|tostring) else $tool+"Url="+.browser_download_url, $tool+"Size="+(.size|tostring) end)' >>".${source}-data"
         i=$(("$i" + 1))
@@ -113,23 +115,23 @@ getTools() {
     [ -f "$cliSource-cli-$cliLatest.jar" ] || { rm "$cliSource"-cli-*.jar &> /dev/null && cliAvailableSize=0 ;}
     [ -f "$integrationsSource-integrations-$integrationsLatest.apk" ] || { rm "$integrationsSource"-integrations-*.apk &> /dev/null && integrationsAvailableSize=0 ;}
     [ "$cliSize" != "$cliAvailableSize" ] &&
-        wget -q -c "$cliUrl" -O "$cliSource"-cli-"$cliLatest".jar --show-progress --user-agent="$userAgent" 2>&1 | stdbuf -o0 cut -b 63-65 | stdbuf -o0 grep '[0-9]' | "${header[@]}" --begin 2 0 --gauge "Source  : $sourceName\nTool    : CLI\nVersion : $cliLatest\nSize    : $(numfmt --to=iec --format="%0.1f" "$cliSize")\n\nDownloading..." -1 -1 "$(($((cliAvailableSize * 100)) / cliSize))" && tput civis
+        wget -q -c "$cliUrl" -O "$cliSource"-cli-"$cliLatest".jar --show-progress --user-agent="$userAgent" 2>&1 | stdbuf -o0 cut -b 63-65 | stdbuf -o0 grep '[0-9]' | "${header[@]}" --begin 2 0 --gauge "Source  : $cliSource\nTool    : CLI\nVersion : $cliLatest\nSize    : $(numfmt --to=iec --format="%0.1f" "$cliSize")\n\nDownloading..." -1 -1 "$(($((cliAvailableSize * 100)) / cliSize))" && tput civis
 
     [ "$cliSize" != "$(ls "$cliSource"-cli-*.jar &> /dev/null && du -b "$cliSource"-cli-*.jar | cut -d $'\t' -f 1 || echo 0)" ] && "${header[@]}" --msgbox "Oops! Unable to download completely.\n\nRetry or change your Network." 12 45 && return 1
 
     [ "$patchesSize" != "$patchesAvailableSize" ] &&
-        wget -q -c "$patchesUrl" -O "$patchesSource"-patches-"$patchesLatest".jar --show-progress --user-agent="$userAgent" 2>&1 | stdbuf -o0 cut -b 63-65 | stdbuf -o0 grep '[0-9]' | "${header[@]}" --begin 2 0 --gauge "Source  : $sourceName\nTool    : Patches\nVersion : $patchesLatest\nSize    : $(numfmt --to=iec --format="%0.1f" "$patchesSize")\n\nDownloading..." -1 -1 "$(($((patchesAvailableSize * 100 / patchesSize))))" && tput civis && patchesUpdated=true
+        wget -q -c "$patchesUrl" -O "$patchesSource"-patches-"$patchesLatest".jar --show-progress --user-agent="$userAgent" 2>&1 | stdbuf -o0 cut -b 63-65 | stdbuf -o0 grep '[0-9]' | "${header[@]}" --begin 2 0 --gauge "Source  : $patchesSource\nTool    : Patches\nVersion : $patchesLatest\nSize    : $(numfmt --to=iec --format="%0.1f" "$patchesSize")\n\nDownloading..." -1 -1 "$(($((patchesAvailableSize * 100 / patchesSize))))" && tput civis && patchesUpdated=true
 
     wget -q -c "$jsonUrl" -O "$patchesSource"-patches-"$patchesLatest".json --user-agent="$userAgent"
 
     [ "$patchesSize" != "$(ls "$patchesSource"-patches-*.jar &> /dev/null && du -b "$patchesSource"-patches-*.jar | cut -d $'\t' -f 1 || echo 0)" ] && "${header[@]}" --msgbox "Oops! Unable to download completely.\n\nRetry or change your Network." 12 45 && return 1
 
     [ "$integrationsSize" != "$integrationsAvailableSize" ] &&
-        wget -q -c "$integrationsUrl" -O "$integrationsSource"-integrations-"$integrationsLatest".apk --show-progress --user-agent="$userAgent" 2>&1 | stdbuf -o0 cut -b 63-65 | stdbuf -o0 grep '[0-9]' | "${header[@]}" --begin 2 0 --gauge "Source  : $sourceName\nTool    : Integrations\nVersion : $integrationsLatest\nSize    : $(numfmt --to=iec --format="%0.1f" "$integrationsSize")\n\nDownloading..." -1 -1 "$(($((integrationsAvailableSize * 100 / integrationsSize))))" && tput civis
+        wget -q -c "$integrationsUrl" -O "$integrationsSource"-integrations-"$integrationsLatest".apk --show-progress --user-agent="$userAgent" 2>&1 | stdbuf -o0 cut -b 63-65 | stdbuf -o0 grep '[0-9]' | "${header[@]}" --begin 2 0 --gauge "Source  : $integrationsSource\nTool    : Integrations\nVersion : $integrationsLatest\nSize    : $(numfmt --to=iec --format="%0.1f" "$integrationsSize")\n\nDownloading..." -1 -1 "$(($((integrationsAvailableSize * 100 / integrationsSize))))" && tput civis
 
     [ "$integrationsSize" != "$(ls "$integrationsSource"-integrations-*.apk &> /dev/null && du -b "$integrationsSource"-integrations-*.apk | cut -d $'\t' -f 1 || echo 0)" ] && "${header[@]}" --msgbox "Oops! File not downloaded.\n\nRetry or change your Network." 12 45 && return 1
 
-    if [ "$patchesUpdated" == "true" ]; then
+    if [ "$patchesUpdated" == true ]; then
         "${header[@]}" --infobox "Updating patches and options file..." 12 45
         java -jar "$cliSource"-cli-*.jar -b "$patchesSource"-patches-*.jar -m "$integrationsSource"-integrations-*.apk -c -a noinput.apk -o nooutput.apk --options "$storagePath/$source-options.json" &> /dev/null
     fi
@@ -153,12 +155,11 @@ changeSource() {
         setEnv source "$selectedSource" update "$envFile"
         sourceName=$(jq -r --arg source "$source" '.[$source].projectName' "$repoDir"/sources.json)
         checkTools || return 1
-        refreshJson || return 1
     fi
 }
 
 selectApp() {
-    [ "$1" == "storage" ] && helpTag=(--help-button --help-label "From Storage")
+    [ "$1" == "storage" ] && helpTag=(--help-button --help-label "From Storage") || helpTag=()
     previousAppName="$appName"
     readarray -t availableApps < <(jq -n -r --argjson appsArray "$appsArray" '$appsArray[] | .index, .appName, .pkgName')
     appIndex=$("${header[@]}" --begin 2 0 --title '| App Selection Menu |' --item-help --default-item "$appIndex" "${helpTag[@]}" --ok-label "Select" --cancel-label "Back" --menu "Use arrow keys to navigate\nSource: $sourceName" $(($(tput lines) - 3)) -1 15 "${availableApps[@]}" 2>&1 >/dev/tty)
@@ -245,8 +246,8 @@ editPatchOptions() {
             fi
         else
             tput cnorm
-            readarray -t patchOptionEntries < <(jq -n -r --arg currentPatch "$currentPatch" --argjson optionsJson "$optionsJson" '$optionsJson[] | select(.patchName == $currentPatch) | .options | to_entries[] | .key as $key | (.value | (.key | length) as $wordLength | ((($key+1) | tostring) + ". " + .key + ":"), ($key*2)+1, 0, .value, ($key*2)+1, ($wordLength + 6), 100, 100, 0)')
-            readarray -t newValues < <("${header[@]}" --begin 2 0 --title '| Patch Options Form |' --ok-label "Save" --cancel-label "Back" --mixedform "Edit patch options for \"$currentPatch\" patch" -1 -1 0 "${patchOptionEntries[@]}" 2>&1 >/dev/tty)
+            readarray -t patchOptionEntries < <(jq -n -r --arg currentPatch "$currentPatch" --argjson optionsJson "$optionsJson" '$optionsJson[] | select(.patchName == $currentPatch) | .options | to_entries[] | .key as $key | (.value | (.key | length) as $wordLength | ((($key+1) | tostring) + ". " + .key + ":"), ($key*2)+1, 0, .value, ($key*2)+1, ($wordLength + 6), 100, 100)')
+            readarray -t newValues < <("${header[@]}" --begin 2 0 --title '| Patch Options Form |' --ok-label "Save" --cancel-label "Back" --form "Edit patch options for \"$currentPatch\" patch" -1 -1 0 "${patchOptionEntries[@]}" 2>&1 >/dev/tty)
             if [ "${newValues[*]}" != "" ]; then
                 optionsJson=$(jq -n -r --arg currentPatch "$currentPatch" --argjson optionsJson "$optionsJson" '$optionsJson | map((select(.patchName == $currentPatch) | .options) |= [(to_entries[] | .key as $key | .value.value = (if $ARGS.positional[$key] == "" then null elif $ARGS.positional[$key] == "null" then null elif $ARGS.positional[$key] == "true" then true elif $ARGS.positional[$key] == "false" then false else $ARGS.positional[$key] end)) | .value])' --args "${newValues[@]}")
             fi
@@ -264,7 +265,7 @@ rootInstall() {
     else
         "${header[@]}" --msgbox "$appName installed Successfully !!" 12 45
     fi
-    if [ "$launchAppAfterMount" == "true" ]; then
+    if [ "$launchAppAfterMount" == true ]; then
         su -c "settings list secure | sed -n -e 's/\/.*//' -e 's/default_input_method=//p' | xargs pidof | xargs kill -9 && pm resolve-activity --brief $pkgName | tail -n 1 | xargs am start -n && pidof com.termux | xargs kill -9" &> /dev/null
     fi
 }
@@ -320,14 +321,14 @@ checkTools() {
         getTools || return 1
     fi
     if [ "$cliSize" == "$(ls "$cliSource"-cli-*.jar &> /dev/null && du -b "$cliSource"-cli-*.jar | cut -d $'\t' -f 1 || echo 0)" ] && [ "$patchesSize" == "$(ls "$patchesSource"-patches-*.jar &> /dev/null && du -b "$patchesSource"-patches-*.jar | cut -d $'\t' -f 1 || echo 0)" ] && [ "$integrationsSize" == "$(ls "$integrationsSource"-integrations-*.apk &> /dev/null && du -b "$integrationsSource"-integrations-*.apk | cut -d $'\t' -f 1 || echo 0)" ] && ls "$storagePath/$source-patches.json" &> /dev/null; then
-        :
+        refreshJson || return 1
     else
         getTools || return 1
     fi
 }
 
 getAppVer() {
-    if [ "$rootStatus" == "root" ] && su -c "pm list packages | grep -q $pkgName" && [ "$allowVersionDowngrade" == "false" ]; then
+    if [ "$root" == true ] && su -c "pm list packages | grep -q $pkgName" && [ "$allowVersionDowngrade" == false ]; then
         selectedVer=$(su -c dumpsys package "$pkgName" | sed -n '/versionName/s/.*=//p' | sed -n '1p')
         appVer="${selectedVer// /-}"
     fi
@@ -360,7 +361,12 @@ checkPatched() {
             rm "apps/$appName-$appVer/base-$sourceName.apk"
             ;;
         1 )
-            "${rootStatus}Install" && return 1
+            if [ "$root" == true ]; then
+                rootInstall
+            else
+                nonRootInstall
+            fi
+            return 1
             ;;
         2 )
             return 1
@@ -388,11 +394,11 @@ selectFile() {
         while read -r itemName; do
             if [ -d "$currentPath/$itemName" ]; then
                 files+=("$itemName")
-                [ ${#itemName} -gt $(("$(tput cols)" - 24)) ] && itemNameDisplay=${itemName:0:$(("$(tput cols)" - 34))}...${itemName: -10} || itemNameDisplay="$itemName"
+                [ "${#itemName}" -gt $(("$(tput cols)" - 24)) ] && itemNameDisplay=${itemName:0:$(("$(tput cols)" - 34))}...${itemName: -10} || itemNameDisplay="$itemName"
                 dirList+=("$((++num))" "$itemNameDisplay/" "DIR: $itemName/")
             elif [ "${itemName##*.}" == "apk" ]; then
                 files+=("$itemName")
-                [ ${#itemName} -gt $(("$(tput cols)" - 24)) ] && itemNameDisplay=${itemName:0:$(("$(tput cols)" - 34))}...${itemName: -10} || itemNameDisplay=$itemName
+                [ "${#itemName}" -gt $(("$(tput cols)" - 24)) ] && itemNameDisplay=${itemName:0:$(("$(tput cols)" - 34))}...${itemName: -10} || itemNameDisplay=$itemName
                 dirList+=("$((++num))" "$itemNameDisplay" "APK: $itemName")
             fi
         done < <(ls -1 --group-directories-first "$currentPath")
@@ -436,7 +442,7 @@ fetchCustomApk() {
     appName="$(sed 's/\./-/g;s/ /-/g' <<<"$fileAppName")"
     selectedVer=$(grep "package:" <<<"$aaptData" | sed -e 's/.*versionName='\''//' -e 's/'\'' platformBuildVersionName.*//')
     appVer="${selectedVer// /-}"
-    if [ "$rootStatus" == "root" ] && su -c "pm list packages | grep -q $pkgName" && [ "$allowVersionDowngrade" == "false" ]; then
+    if [ "$root" == true ] && su -c "pm list packages | grep -q $pkgName" && [ "$allowVersionDowngrade" == false ]; then
         installedVer=$(su -c dumpsys package "$pkgName" | sed -n '/versionName/s/.*=//p' | sed -n '1p')
         if [ "$installedVer" != "$selectedVer" ]; then
             compareArray=("$selectedVer" "$installedVer")
@@ -501,7 +507,7 @@ downloadApp() {
         return 1
         ;;
     "noapk" )
-        if [ "$rootStatus" == "nonRoot" ]; then
+        if [ "$root" == false ]; then
             "${header[@]}" --msgbox "No apk found on apkmirror.com for version $selectedVer !!\nTry selecting other version." 12 45
             return 1
         else
@@ -515,6 +521,7 @@ downloadApp() {
         ;;
     esac
     appSize="$(curl -sLI "$appUrl" -A "$userAgent" | sed -n '/Content-Length/s/[^0-9]*//p' | tr -d '\r')"
+    [ "$appSize" == "" ] && return 1
     setEnv "${appName//-/_}Size" "$appSize" update "apps/.appSize"
     [ -d "apps/$appName-$appVer" ] || mkdir -p "apps/$appName-$appVer"
     wget -q -c "$appUrl" -O "apps/$appName-$appVer/base.apk" --show-progress --user-agent="$userAgent" 2>&1 | stdbuf -o0 cut -b 63-65 | stdbuf -o0 grep '[0-9]' | "${header[@]}" --begin 2 0 --gauge "App    : $appName\nVersion: $selectedVer\nSize   : $(numfmt --to=iec --format="%0.1f" "$appSize")\n\nDownloading..." -1 -1 "$(($(( "$([ -f "apps/$appName-$appVer/base.apk" ] && du -b "apps/$appName-$appVer/base.apk" | cut -d $'\t' -f 1 || echo 0)" * 100)) / appSize))"
@@ -537,7 +544,7 @@ downloadMicrog() {
 }
 
 patchApp() {
-    if [ "$source" == "inotia00" ] && [ "$riplibsRVX" == "true" ]; then
+    if [ "$cliSource" == "inotia00" ] && [ "$riplibs" == true ]; then
         riplibArgs="--rip-lib=x86_64 --rip-lib=x86 --rip-lib=armeabi-v7a --rip-lib=arm64-v8a "
         riplibArgs="${riplibArgs//--rip-lib=$arch /}"
     fi
@@ -550,30 +557,12 @@ patchApp() {
     includedPatches=$(jq '.' "$storagePath/$source-patches.json" 2>/dev/null || jq -n '[]')
     patchesArg=$(jq -n -r --argjson includedPatches "$includedPatches" --arg pkgName "$pkgName" '$includedPatches[] | select(.pkgName == $pkgName).includedPatches | if ((. | length) != 0) then (.[] | "-i " + (. | ascii_downcase | sub(" "; "-"; "g"))) else empty end')
     java -jar "$cliSource"-cli-*.jar -b "$patchesSource"-patches-*.jar -m "$integrationsSource"-integrations-*.apk -c -a "apps/$appName-$appVer/base.apk" -o "apps/$appName-$appVer/base-$sourceName.apk" $patchesArg $riplibArgs --keystore "$keystore" --custom-aapt2-binary ./aapt2 --options "$storagePath/$source-options.json" --experimental --exclusive 2>&1 | tee "$storagePath/patch_log.txt" | "${header[@]}" --begin 2 0 --ok-label "Continue" --cursor-off-label --programbox "Patching $appName $selectedVer.apk" -1 -1
-    echo -e "\n\n\nVariant: $rootStatus\nArch: $arch\nApp: $appName v$appVer\nCLI: $(ls "$cliSource"-cli-*.jar)\nPatches: $(ls "$patchesSource"-patches-*.jar)\nIntegrations: $(ls "$integrationsSource"-integrations-*.apk)\nPatches argument: ${patchesArg[*]}" >>"$storagePath/patch_log.txt"
+    echo -e "\n\n\nRooted: $root\nArch: $arch\nApp: $appName v$appVer\nCLI: $(ls "$cliSource"-cli-*.jar)\nPatches: $(ls "$patchesSource"-patches-*.jar)\nIntegrations: $(ls "$integrationsSource"-integrations-*.apk)\nPatches argument: ${patchesArg[*]}" >>"$storagePath/patch_log.txt"
     tput civis
     sleep 1
     if [ ! -f "apps/$appName-$appVer/base-$sourceName.apk" ]; then
         "${header[@]}" --msgbox "Oops, Patching failed !!\nLogs saved to \"Internal Storage/Revancify/patch_log.txt\". Share the Patchlog to developer." 12 45
         return 1
-    fi
-}
-
-checkMicrogPatch() {
-    [[ "$pkgName" != *"youtube"* ]] && return 0
-    microgPatch=$(jq -r -n --arg pkgName "$pkgName" --argjson patchesJson "$patchesJson" 'first($patchesJson[] | if (.name | test(".*microg.*")) then if (.compatiblePackages | (map(.name) | index($pkgName)) != null) then .name else empty end else empty end)')
-    [ "$microgPatch" == "" ] && return 0
-    microgStatus=$(jq -n -r --argjson includedPatches "$includedPatches" --arg pkgName "$pkgName" --arg microgPatch "$microgPatch" '$includedPatches[] | select(.pkgName == $pkgName) | .includedPatches | index($microgPatch)')
-    if [ "$microgStatus" != "null" ] && [ "$rootStatus" == "root" ]; then
-        if ! "${header[@]}" --begin 2 0 --title '| MicroG warning |' --no-items --defaultno --yes-label "Continue" --no-label "Exclude" --yesno "You have a rooted device and you have included \"$microgPatch\" patch. This may result in $appName app crash.\n\n\nDo you want to exclude it or continue?" -1 -1; then
-            jq -n -r --arg microgPatch "$microgPatch" --argjson includedPatches "$includedPatches" --arg pkgName "$pkgName" '[$includedPatches[] | (select(.pkgName == $pkgName) | .includedPatches) |= del(.[(. | index($microgPatch))])]' >"$storagePath/$source-patches.json"
-            return 0
-        fi
-    elif [ "$microgStatus" == "null" ] && [ "$rootStatus" == "nonRoot" ]; then
-        if ! "${header[@]}" --begin 2 0 --title '| MicroG warning |' --no-items --defaultno --yes-label "Continue" --no-label "Include" --yesno "You have a non-rooted device and you have not included \"$microgPatch\" patch. This may result in $appName app crash.\n\n\nDo you want to include it or continue?" -1 -1; then
-            jq -n -r --arg microgPatch "$microgPatch" --argjson includedPatches "$includedPatches" --arg pkgName "$pkgName" '[$includedPatches[] | (select(.pkgName == $pkgName) | .includedPatches) |= . + [$microgPatch]]' >"$storagePath/$source-patches.json"
-            return 0
-        fi
     fi
 }
 
@@ -607,7 +596,8 @@ deleteComponents() {
 }
 
 preferences() {
-    prefsArray=("lightTheme" "$lightTheme" "Use Light theme for Revancify" "riplibsRVX" "$riplibsRVX" "[RVX] Removes extra libs from app" "forceUpdateCheckStatus" "$forceUpdateCheckStatus" "Check for tools update at startup" "patchMenuBeforePatching" "$patchMenuBeforePatching" "Shows Patches Menu before Patching starts" "launchAppAfterMount" "$launchAppAfterMount" "[Root] Launches app automatically after mount" allowVersionDowngrade "$allowVersionDowngrade" "[Root] Allows downgrading version if any such module is present" "fetchPreRelease" "$fetchPreRelease" "Fetches the pre-release version of tools")
+    [ "$cliSource" == "inotia00" ] && riplibsPref=("riplibs" "$riplibs" "Removes extra libs from app") || riplibsPref=()
+    prefsArray=("lightTheme" "$lightTheme" "Use Light theme for Revancify" "${riplibsPref[@]}" "forceUpdateCheckStatus" "$forceUpdateCheckStatus" "Check for tools update at startup" "patchMenuBeforePatching" "$patchMenuBeforePatching" "Shows Patches Menu before Patching starts" "launchAppAfterMount" "$launchAppAfterMount" "[Root] Launches app automatically after mount" allowVersionDowngrade "$allowVersionDowngrade" "[Root] Allows downgrading version if any such module is present" "fetchPreRelease" "$fetchPreRelease" "Fetches the pre-release version of tools")
     readarray -t prefsArray < <(for pref in "${prefsArray[@]}"; do sed 's/false/off/;s/true/on/' <<< "$pref"; done)
     read -ra newPrefs < <("${header[@]}" --begin 2 0 --title '| Preferences Menu |' --item-help --no-items --no-cancel --ok-label "Save" --checklist "Use arrow keys to navigate; Press Spacebar to toogle patch" $(($(tput lines) - 3)) -1 15 "${prefsArray[@]}" 2>&1 >/dev/tty)
     sed -i 's/true/false/' "$envFile"
@@ -616,7 +606,7 @@ preferences() {
     done
     # shellcheck source=/dev/null
     source "$envFile"
-    [ "$lightTheme" == "true" ] && theme=Light || theme=Dark
+    [ "$lightTheme" == true ] && theme=Light || theme=Dark
     export DIALOGRC="$repoDir/configs/.dialogrc$theme"
 }
 
@@ -627,15 +617,17 @@ buildApk() {
         fetchCustomApk || return 1
         selectPatches Proceed
     fi
-    if [ "$appType" == "downloaded" ] && [ "$patchMenuBeforePatching" == "true" ]; then
+    if [ "$appType" == "downloaded" ] && [ "$patchMenuBeforePatching" == true ]; then
         selectPatches Proceed
     fi
-    checkMicrogPatch
     patchApp || return 1
-    "${rootStatus}Install"
+    if [ "$root" == true ]; then
+        rootInstall
+    else
+        nonRootInstall
+    fi
 }
 
-userAgent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/74.0.3729.169 Safari/537.36"
 mainMenu() {
     mainMenu=$("${header[@]}" --begin 2 0 --title '| Main Menu |' --default-item "$mainMenu" --ok-label "Select" --cancel-label "Exit" --menu "Use arrow keys to navigate\nSource: $sourceName" -1 -1 0 1 "Patch App" 2 "Select Patches" 3 "Change Source" 4 "Fetch Tools" 5 "Edit Patch Options" 6 "$menuEntry" 7 "Delete Components" 8 "Preferences" 2>&1 >/dev/tty) || terminate 0
     case "$mainMenu" in
@@ -661,9 +653,9 @@ mainMenu() {
         editPatchOptions
         ;;
     6 )
-        if [ "$rootStatus" == "root" ]; then
+        if [ "$root" == true ]; then
             rootUninstall
-        elif [ "$rootStatus" == "nonRoot" ]; then
+        else
             downloadMicrog
         fi
         ;;
@@ -677,16 +669,15 @@ mainMenu() {
 }
 
 if su -c exit &> /dev/null; then
-    [ "$1" == "nonRoot" ] && rootStatus=nonRoot || rootStatus=root
+    [ "$1" == false ] && root=false || root=true
 else
-    rootStatus=nonRoot
+    root=false
 fi
 
 initialize
 
-if [ "$forceUpdateCheckStatus" == "true" ]; then
-    getTools
-fi
+[ "$forceUpdateCheckStatus" == true ] && getTools
+
 while true; do
     unset appVerList appVer appName pkgName
     mainMenu
