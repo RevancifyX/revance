@@ -65,25 +65,26 @@
             }
         }
     },
-    "YT-Advanced (test)": 
+    "kitadai31": 
     {
-        "projectName": "ReX",
+        "projectName": "RVX(Android6-7)",
         "sources": 
         {
             "cli":
             {
-                "org": "inotia00",
-                "repo": "revanced-cli"
+                "org": "kitadai31",
+                "repo": "rvcli"
             },
             "patches":
             {
-                "org": "YT-Advanced",
-                "repo": "testpatch"
+                "org": "kitadai31",
+                "repo": "revanced-patches-android6-7"
             },
             "integrations":
             {
-                "org": "YT-Advanced",
-                "repo": "testinte"
+                "org": "kitadai31",
+                "repo": "revanced-integrations"
             }
         }
-    },
+    }
+}
