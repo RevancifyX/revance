@@ -14,7 +14,7 @@ if [ -z "$TERMUX_VERSION" ]; then
 fi
 
 if [ -d "$HOME/RevancifyX" ]; then
-    ./RevancifyX/Revancify
+    ./RevancifyX/revance
     exit 0
 fi
 
@@ -30,8 +30,8 @@ Possible causes of error:
     pkg install git -y -o Dpkg::Options::="--force-confnew"
 fi
 
-if git clone --depth=1 https://github.com/decipher3114/Revancify.git; then
-    $HOME/RevancifyX/Revancify
+if git clone --depth=1 https://github.com/revancifyx/revance.git; then
+    $HOME/RevancifyX/revance
 else
     echo -e "\e[1;31mInstall Failed !!\e[0m"
     echo "Please Try again"
