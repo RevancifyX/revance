@@ -14,7 +14,7 @@ if [ -z "$TERMUX_VERSION" ]; then
 fi
 
 if [ -d "$HOME/revance" ]; then
-    ./RevancifyX/revance
+    ./Revance/revancify
     exit 0
 fi
 
